@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Producer-Consumer Patterns - Real-Time Visualization</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔄 Producer-Consumer Patterns</h1>
+            <p class="subtitle">Real-Time Concurrency Visualization</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Control Panel -->
+            <div class="panel control-panel">
+                <h2>⚙️ Configuration</h2>
+
+                <div class="form-group">
+                    <label for="pattern-select">Pattern:</label>
+                    <select id="pattern-select">
+                        <option value="basic">Basic (Unbuffered Channel)</option>
+                        <option value="buffered" selected>Buffered Channel</option>
+                        <option value="worker_pool">Worker Pool</option>
+                        <option value="fan_out_fan_in">Fan-Out/Fan-In</option>
+                        <option value="pipeline">Pipeline</option>
+                        <option value="rate_limited">Rate-Limited</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="item-count">Items to Process:</label>
+                    <input type="number" id="item-count" value="1000" min="10" max="10000" step="10">
+                    <span class="value-display" id="item-count-display">1000</span>
+                </div>
+
+                <div class="form-group buffer-config">
+                    <label for="buffer-size">Buffer Size:</label>
+                    <input type="range" id="buffer-size" value="100" min="10" max="1000" step="10">
+                    <span class="value-display" id="buffer-size-display">100</span>
+                </div>
+
+                <div class="form-group worker-config">
+                    <label for="worker-count">Worker Count:</label>
+                    <input type="range" id="worker-count" value="4" min="1" max="16" step="1">
+                    <span class="value-display" id="worker-count-display">4</span>
+                </div>
+
+                <div class="form-group rate-config" style="display:none;">
+                    <label for="producer-rate">Producer Rate (items/sec):</label>
+                    <input type="range" id="producer-rate" value="50" min="10" max="200" step="10">
+                    <span class="value-display" id="producer-rate-display">50</span>
+                </div>
+
+                <div class="form-group rate-config" style="display:none;">
+                    <label for="consumer-rate">Consumer Rate (items/sec):</label>
+                    <input type="range" id="consumer-rate" value="50" min="10" max="200" step="10">
+                    <span class="value-display" id="consumer-rate-display">50</span>
+                </div>
+
+                <div class="button-group">
+                    <button id="start-btn" class="btn btn-primary">▶ Start</button>
+                    <button id="stop-btn" class="btn btn-danger" disabled>⏹ Stop</button>
+                </div>
+
+                <div class="status">
+                    <span class="status-label">Status:</span>
+                    <span id="status-text" class="status-idle">Idle</span>
+                </div>
+            </div>
+
+            <!-- Metrics Dashboard -->
+            <div class="panel metrics-panel">
+                <h2>📊 Real-Time Metrics</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Items Produced</div>
+                        <div class="metric-value" id="produced-count">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Items Consumed</div>
+                        <div class="metric-value" id="consumed-count">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Throughput</div>
+                        <div class="metric-value" id="throughput">0<span class="unit">items/s</span></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Duration</div>
+                        <div class="metric-value" id="duration">0.0<span class="unit">s</span></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Queue Depth</div>
+                        <div class="metric-value" id="queue-depth">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Buffer Utilization</div>
+                        <div class="metric-value" id="buffer-util">0<span class="unit">%</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+            <div class="chart-container">
+                <h3>Throughput Over Time</h3>
+                <canvas id="throughput-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Queue Depth & Buffer Utilization</h3>
+                <canvas id="queue-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Pattern Info -->
+        <div class="panel info-panel">
+            <h3>📖 Pattern Information</h3>
+            <div id="pattern-info">
+                <p>Select a pattern to see details.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
