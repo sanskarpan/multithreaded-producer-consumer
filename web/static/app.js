@@ -1,5 +1,9 @@
 // Producer-Consumer Real-Time Visualization
 
+const INITIAL_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+const CHART_REDRAW_HZ = 10;
+
 class PatternVisualizer {
     constructor() {
         this.ws = null;
@@ -14,6 +18,8 @@ class PatternVisualizer {
         this.reconnectAttempts = 0;
         this.reconnectTimer = null;
         this.shouldReconnect = true;
+        this.redrawScheduled = false;
+        this.pendingChartData = null;
 
         this.init();
     }
@@ -51,16 +57,6 @@ class PatternVisualizer {
 
         this.updateConfigVisibility('buffered');
         this.updatePatternInfo('buffered');
-    }
-
-    // parseIntOr returns def when the input is empty, NaN, or a number outside
-    // [min, max]. Otherwise returns the parsed integer.
-    parseIntOr(value, def, min, max) {
-        const n = parseInt(value, 10);
-        if (Number.isNaN(n)) return def;
-        if (n < min) return def;
-        if (max !== undefined && n > max) return def;
-        return n;
     }
 
     updateConfigVisibility(pattern) {
@@ -249,8 +245,10 @@ class PatternVisualizer {
             if (!this.shouldReconnect) {
                 return;
             }
-            // Exponential backoff: 1s, 2s, 4s, ... capped at 30s.
-            const delay = Math.min(30000, 1000 * Math.pow(2, this.reconnectAttempts));
+            // Exponential backoff with jitter: 1s, 2s, 4s, ... capped at 30s.
+            const base = Math.min(MAX_RECONNECT_DELAY_MS, INITIAL_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts));
+            const jitter = Math.random() * 0.3 * base;
+            const delay = Math.floor(base + jitter);
             this.reconnectAttempts++;
             this.reconnectTimer = setTimeout(() => this.connectWebSocket(), delay);
         };
@@ -266,63 +264,6 @@ class PatternVisualizer {
             this.ws.close();
             this.ws = null;
         }
-    }
-
-        this.ws.onopen = () => {
-            console.log('WebSocket connected');
-            this.reconnectAttempt = 0;
-            this.setConnectionStatus('connected');
-        };
-
-        this.ws.onmessage = (event) => {
-            let metrics;
-            try {
-                metrics = JSON.parse(event.data);
-            } catch (err) {
-                console.error('WS message parse error:', err, 'raw:', event.data);
-                return;
-            }
-            this.updateMetrics(metrics);
-        };
-
-        this.ws.onerror = (error) => {
-            // onerror is followed by onclose; reconnect there.
-            console.error('WebSocket error:', error);
-            this.setConnectionStatus('error');
-        };
-
-        this.ws.onclose = () => {
-            console.log('WebSocket disconnected');
-            this.setConnectionStatus('disconnected');
-            if (this.shouldReconnect) {
-                this.scheduleReconnect();
-            }
-        };
-    }
-
-    scheduleReconnect() {
-        if (this.reconnectTimer) return;
-        this.reconnectAttempt++;
-        // Exponential backoff with jitter and ceiling.
-        const base = Math.min(INITIAL_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempt - 1), MAX_RECONNECT_DELAY_MS);
-        const jitter = Math.random() * 0.3 * base;
-        const delay = Math.floor(base + jitter);
-        console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            this.connectWebSocket();
-        }, delay);
-    }
-
-    setConnectionStatus(state) {
-        const el = document.getElementById('status-text');
-        if (!el) return;
-        if (state === 'connected' && !this.isRunning) {
-            el.textContent = 'idle';
-            el.className = 'status-idle';
-        }
-        // We don't overwrite the status when state changes mid-run; the
-        // per-pattern metric message drives the status text.
     }
 
     scheduleChartRedraw() {
@@ -355,7 +296,6 @@ class PatternVisualizer {
     }
 
     updateMetrics(metrics) {
-        // Metric cards update on every message (cheap text writes).
         const produced = metrics.items_produced || 0;
         const consumed = metrics.items_consumed || 0;
         const throughput = (metrics.throughput || 0);
@@ -372,12 +312,12 @@ class PatternVisualizer {
         set('consumed-count', consumed);
 
         const tput = document.getElementById('throughput');
-        if (tput) tput.innerHTML = `${throughput.toFixed(1)}<span class="unit">items/s</span>`;
+        if (tput) tput.textContent = throughput.toFixed(1);
         const dur = document.getElementById('duration');
-        if (dur) dur.innerHTML = `${duration.toFixed(1)}<span class="unit">s</span>`;
+        if (dur) dur.textContent = duration.toFixed(1);
         set('queue-depth', queueDepth);
         const util = document.getElementById('buffer-util');
-        if (util) util.innerHTML = `${bufferUtil.toFixed(1)}<span class="unit">%</span>`;
+        if (util) util.textContent = bufferUtil.toFixed(1);
 
         const statusText = document.getElementById('status-text');
         if (statusText) {
@@ -385,7 +325,6 @@ class PatternVisualizer {
             statusText.className = `status-${status}`;
         }
 
-        // Throttle chart redraws to CHART_REDRAW_HZ.
         this.pendingChartData = metrics;
         this.scheduleChartRedraw();
     }
@@ -397,13 +336,10 @@ class PatternVisualizer {
         };
         set('produced-count', 0);
         set('consumed-count', 0);
-        const tput = document.getElementById('throughput');
-        if (tput) tput.innerHTML = `0.0<span class="unit">items/s</span>`;
-        const dur = document.getElementById('duration');
-        if (dur) dur.innerHTML = `0.0<span class="unit">s</span>`;
+        set('throughput', '0.0');
+        set('duration', '0.0');
         set('queue-depth', 0);
-        const util = document.getElementById('buffer-util');
-        if (util) util.innerHTML = `0.0<span class="unit">%</span>`;
+        set('buffer-util', '0.0');
     }
 
     async start() {
@@ -443,18 +379,6 @@ class PatternVisualizer {
         } catch (error) {
             console.error('Error starting pattern:', error);
             alert('Failed to start pattern: network error');
-        }
-    }
-            } else {
-                // Server-side validation error. Show the body so the user knows
-                // why their config was rejected.
-                const text = await response.text();
-                const message = text || `Server returned ${response.status}`;
-                alert(`Failed to start pattern: ${message}`);
-            }
-        } catch (error) {
-            console.error('Error starting pattern:', error);
-            alert(`Failed to start pattern: ${error.message || error}`);
         }
     }
 
