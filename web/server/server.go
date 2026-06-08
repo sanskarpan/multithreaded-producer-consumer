@@ -33,6 +33,7 @@ type Server struct {
 	activePattern string
 	patternStatus string
 	patternDone   chan struct{}
+	patternWg     sync.WaitGroup // tracks running pattern goroutines
 }
 
 // Option configures a Server at construction time.
@@ -95,8 +96,19 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("/", http.FileServer(http.Dir(s.staticDir)))
 }
 
-// Handler returns the mux for testability (allows direct ServeHTTP calls).
-func (s *Server) Handler() http.Handler { return s.mux }
+// securityHeaders wraps an http.Handler to add production-grade security
+// headers. This is a lightweight middleware that doesn't affect performance.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Handler returns the mux wrapped with security headers for testability.
+func (s *Server) Handler() http.Handler { return securityHeaders(s.mux) }
 
 // Start starts the HTTP server. It blocks until the server stops.
 func (s *Server) Start(addr string) error {
@@ -242,9 +254,13 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.activePattern = config.Pattern
 	s.patternStatus = "running"
 	s.patternDone = done
+	s.patternWg.Add(1)
 	s.mu.Unlock()
 
-	go s.runPattern(ctx, &config, done)
+	go func() {
+		defer s.patternWg.Done()
+		s.runPattern(ctx, &config, done)
+	}()
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "started",
@@ -352,6 +368,8 @@ func (s *Server) runPattern(ctx context.Context, config *PatternConfig, done cha
 		default:
 			s.collector.CompleteMetric(config.Pattern)
 		}
+		// Evict old completed metrics to prevent unbounded memory growth.
+		s.collector.EvictCompleted(5 * time.Minute)
 	}()
 
 	s.collector.InitMetric(config.Pattern, config.BufferSize, config.WorkerCount)
@@ -711,6 +729,17 @@ func (s *Server) stopPattern() {
 		case <-time.After(10 * time.Second):
 			logging.L().Warn("pattern did not stop within 10s of cancellation")
 		}
+	}
+	// Wait for the goroutine to actually exit so we don't leak.
+	doneCh := make(chan struct{})
+	go func() {
+		s.patternWg.Wait()
+		close(doneCh)
+	}()
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		logging.L().Warn("pattern goroutine did not exit within 2s of done signal")
 	}
 }
 

@@ -269,6 +269,26 @@ func TestServer_ShutdownIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestServer_SecurityHeaders verifies that the security headers middleware
+// sets X-Content-Type-Options, X-Frame-Options, and Referrer-Policy on
+// every response.
+func TestServer_SecurityHeaders(t *testing.T) {
+	s := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := rr.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := rr.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
+		t.Errorf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
+	}
+}
+
 // TestServer_StartReturnsJSONError is a regression test verifying that bad
 // /api/start requests return a JSON error payload (so the frontend can show
 // the message) rather than a plain text response.
