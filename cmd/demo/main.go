@@ -6,9 +6,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/sanskarpan/producer-consumer/consumer"
@@ -17,6 +19,15 @@ import (
 )
 
 func main() {
+	// Handle SIGINT/SIGTERM for clean exit.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n\nInterrupted. Goodbye!")
+		os.Exit(0)
+	}()
+
 	fmt.Println("╔══════════════════════════════════════════════════════╗")
 	fmt.Println("║  Producer-Consumer Pattern Demo                      ║")
 	fmt.Println("║  Interactive demonstrations of concurrency patterns  ║")
