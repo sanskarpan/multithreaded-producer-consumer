@@ -178,6 +178,20 @@ func (c *Collector) Clear() {
 	c.mu.Unlock()
 }
 
+// EvictCompleted removes metrics for patterns whose status is "completed" or
+// "stopped" and whose StartTime is older than maxAge. This prevents
+// unbounded memory growth in long-running servers that start many patterns.
+func (c *Collector) EvictCompleted(maxAge time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	for name, m := range c.metrics {
+		if (m.Status == "completed" || m.Status == "stopped") && m.StartTime.Before(cutoff) {
+			delete(c.metrics, name)
+		}
+	}
+}
+
 // InitMetric initializes a new metric entry for a pattern.
 func (c *Collector) InitMetric(patternName string, bufferSize, workerCount int) {
 	c.mu.Lock()

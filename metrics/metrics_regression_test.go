@@ -83,3 +83,81 @@ func TestCollector_RecordNil(t *testing.T) {
 	c.RecordMetric(nil)
 	c.RecordMetric(&Metrics{})
 }
+
+// TestCollector_EvictCompleted verifies that EvictCompleted removes old
+// completed/stopped metrics and leaves active ones intact.
+func TestCollector_EvictCompleted(t *testing.T) {
+	c := NewCollector()
+
+	// Create metrics at different times.
+	c.InitMetric("running", 16, 2)
+	c.InitMetric("completed-old", 16, 2)
+	c.InitMetric("stopped-old", 16, 2)
+	c.InitMetric("completed-recent", 16, 2)
+
+	// Simulate completion with old timestamps.
+	old := c.GetMetrics("completed-old")
+	old.StartTime = time.Now().Add(-10 * time.Minute)
+	old.Status = "completed"
+	c.RecordMetric(old)
+
+	stopped := c.GetMetrics("stopped-old")
+	stopped.StartTime = time.Now().Add(-10 * time.Minute)
+	stopped.Status = "stopped"
+	c.RecordMetric(stopped)
+
+	// completed-recent is fresh (not old enough to evict).
+	recent := c.GetMetrics("completed-recent")
+	recent.Status = "completed"
+	c.RecordMetric(recent)
+
+	// running is active.
+	running := c.GetMetrics("running")
+	running.Status = "running"
+	c.RecordMetric(running)
+
+	c.EvictCompleted(5 * time.Minute)
+
+	// Old completed/stopped should be evicted.
+	if c.GetMetrics("completed-old") != nil {
+		t.Fatal("expected completed-old to be evicted")
+	}
+	if c.GetMetrics("stopped-old") != nil {
+		t.Fatal("expected stopped-old to be evicted")
+	}
+
+	// Recent completed should still exist.
+	if c.GetMetrics("completed-recent") == nil {
+		t.Fatal("expected completed-recent to survive eviction")
+	}
+
+	// Running should still exist.
+	if c.GetMetrics("running") == nil {
+		t.Fatal("expected running to survive eviction")
+	}
+}
+
+// TestCollector_EvictCompletedNoOp verifies eviction with no metrics is safe.
+func TestCollector_EvictCompletedNoOp(t *testing.T) {
+	c := NewCollector()
+	// Should not panic.
+	c.EvictCompleted(time.Hour)
+}
+
+// TestCollector_EvictCompletedOnlyOldActive verifies active metrics with old
+// timestamps are NOT evicted (only completed/stopped are).
+func TestCollector_EvictCompletedOnlyOldActive(t *testing.T) {
+	c := NewCollector()
+	c.InitMetric("old-active", 16, 2)
+
+	m := c.GetMetrics("old-active")
+	m.StartTime = time.Now().Add(-10 * time.Hour)
+	m.Status = "running"
+	c.RecordMetric(m)
+
+	c.EvictCompleted(time.Minute)
+
+	if c.GetMetrics("old-active") == nil {
+		t.Fatal("active metrics should not be evicted regardless of age")
+	}
+}
