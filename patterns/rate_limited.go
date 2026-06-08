@@ -259,9 +259,22 @@ func (rl *RateLimitedPattern) Errors() []error {
 	return out
 }
 
-// Stats returns running production / consumption counters.
+// Stats returns running production / consumption counters. The consumed count
+// is read live from the registered consumers so it reflects items processed
+// during execution, not just the final snapshot.
 func (rl *RateLimitedPattern) Stats() (produced, consumed int) {
-	return int(rl.producedCount.Load()), int(rl.consumedCount.Load())
+	produced = int(rl.producedCount.Load())
+	// Read consumed count live from the consumers when available, falling
+	// back to the stored atomic for the post-Run snapshot.
+	consumed = int(rl.consumedCount.Load())
+	if consumed == 0 {
+		for _, c := range rl.consumers {
+			if ac, ok := c.(interface{ ConsumedCount() int }); ok {
+				consumed += ac.ConsumedCount()
+			}
+		}
+	}
+	return produced, consumed
 }
 
 // ProducerRate returns the configured producer rate.
