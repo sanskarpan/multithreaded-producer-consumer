@@ -72,7 +72,8 @@ func (c *BaseConsumer) Processor() ProcessFunc { return c.processor }
 func (c *BaseConsumer) Base() *BaseConsumer { return c }
 
 // Consume receives and processes data from the input channel until the input
-// channel is closed or the context is cancelled.
+// channel is closed or the context is cancelled. When the channel closes, any
+// remaining items buffered in a BatchConsumer are flushed automatically.
 func (c *BaseConsumer) Consume(ctx context.Context, in <-chan interface{}) error {
 	if in == nil {
 		return errors.New("consumer: input channel is nil")
@@ -289,6 +290,19 @@ func (c *BatchConsumer) BatchSize() int { return c.batchSize }
 
 // Base returns the embedded BaseConsumer.
 func (c *BatchConsumer) Base() *BaseConsumer { return c.BaseConsumer }
+
+// Consume overrides BaseConsumer.Consume to automatically flush any remaining
+// batched items when the input channel closes. This prevents silent data loss
+// when the caller forgets to call Flush().
+func (c *BatchConsumer) Consume(ctx context.Context, in <-chan interface{}) error {
+	err := c.BaseConsumer.Consume(ctx, in)
+	// Flush any leftover items regardless of whether Consume returned an error
+	// or completed normally.
+	if flushErr := c.Flush(); flushErr != nil && err == nil {
+		return flushErr
+	}
+	return err
+}
 
 // Flush processes any remaining items in the in-progress batch. Safe to call
 // once consumers have terminated.
